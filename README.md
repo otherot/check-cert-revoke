@@ -89,7 +89,8 @@ All options can be placed in `config.json`. CLI flags override config values.
     "log_file": "/var/log/check-cert-revoke.log",
     "telegram": {
         "bot_token": "123456:ABC-DEF...",
-        "chat_id": "123456789"
+        "chat_id": "123456789",
+        "report_all": true
     }
 }
 ```

@@ -19,6 +19,7 @@
 
     "telegram": {
         "bot_token": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz",
-        "chat_id": "123456789"
+        "chat_id": "123456789",
+        "report_all": true
     }
 }

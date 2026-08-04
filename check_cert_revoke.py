@@ -405,13 +405,33 @@ def _revocation_reason_name(reason) -> str:
 
 def send_telegram_alert(token: str, chat_id: str, r: dict, prev_status: str | None = None):
     """Отправляет уведомление в Telegram о статусе сертификата."""
+    text = _format_telegram_message(r, prev_status)
+    _send_telegram_raw(token, chat_id, text)
+
+
+def send_telegram_report(token: str, chat_id: str, results: list[dict]):
+    """Отправляет сводку по всем доменам после цикла проверки."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    lines = [f"\U0001f4ca *Certificate Status Report*", f"_{ts}_", ""]
+
+    status_order = {"REVOKED": 0, "EXPIRED": 1, "ERROR": 2, "WARNING": 3, "UNKNOWN": 4, "GOOD": 5}
+    sorted_results = sorted(results, key=lambda r: status_order.get(r["status"], 99))
+
+    for r in sorted_results:
+        emoji = {
+            "GOOD": "\u2705", "REVOKED": "\u274c", "EXPIRED": "\u26a0\ufe0f",
+            "ERROR": "\u2757", "UNKNOWN": "\u2753", "WARNING": "\u26a0\ufe0f",
+        }.get(r["status"], "\u2139\ufe0f")
+        lines.append(f"{emoji} `{r['host']}:{r['port']}` — {r['status']}")
+
+    _send_telegram_raw(token, chat_id, "\n".join(lines))
+
+
+def _format_telegram_message(r: dict, prev_status: str | None = None) -> str:
+    """Форматирует сообщение для Telegram по одному сертификату."""
     emoji = {
-        "GOOD": "\u2705",
-        "REVOKED": "\u274c",
-        "EXPIRED": "\u26a0\ufe0f",
-        "ERROR": "\u2757",
-        "UNKNOWN": "\u2753",
-        "WARNING": "\u26a0\ufe0f",
+        "GOOD": "\u2705", "REVOKED": "\u274c", "EXPIRED": "\u26a0\ufe0f",
+        "ERROR": "\u2757", "UNKNOWN": "\u2753", "WARNING": "\u26a0\ufe0f",
     }.get(r["status"], "\u2139\ufe0f")
 
     lines = [
@@ -421,16 +441,17 @@ def send_telegram_alert(token: str, chat_id: str, r: dict, prev_status: str | No
         f"*Issuer:* {r['issuer']}",
         f"*Status:* {r['status']}",
     ]
-
     if prev_status:
         lines.append(f"*Changed:* {prev_status} \u2192 {r['status']}")
     if r["detail"]:
         lines.append(f"*Details:* {r['detail']}")
     if r["method"]:
         lines.append(f"*Method:* {r['method']}")
+    return "\n".join(lines)
 
-    text = "\n".join(lines)
 
+def _send_telegram_raw(token: str, chat_id: str, text: str):
+    """Отправляет сырое сообщение в Telegram."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = json.dumps({
         "chat_id": chat_id,
@@ -518,6 +539,7 @@ def apply_config(cfg: dict, args: argparse.Namespace):
     if not hasattr(args, "telegram_token"):
         args.telegram_token = tg.get("bot_token")
         args.telegram_chat_id = tg.get("chat_id")
+        args.telegram_report_all = tg.get("report_all", False)
 
 
 def _get_explicit_args() -> dict[str, bool]:
@@ -647,7 +669,8 @@ def log_result(r: dict, log_file: str, alert_only: bool, prev_status: str | None
 
 def watch_loop(targets: list[tuple[str, int]], timeout: float, interval: int,
                log_file: str | None, alert_only: bool, verbose: bool,
-               tg_token: str | None = None, tg_chat_id: str | None = None):
+               tg_token: str | None = None, tg_chat_id: str | None = None,
+               tg_report_all: bool = False):
     """Бесконечный цикл проверки по расписанию."""
     state: dict[str, str] = {}  # key: "host:port" -> previous status
 
@@ -655,7 +678,8 @@ def watch_loop(targets: list[tuple[str, int]], timeout: float, interval: int,
     print(f"Watch mode started. Checking {len(targets)} target(s) every {interval}s.")
     print(f"Log: {'stdout' if log_file is None else log_file}")
     print(f"Alert only: {alert_only}")
-    print(f"Telegram alerts: {'enabled' if tg_enabled else 'disabled'}")
+    print(f"Telegram: {'enabled' if tg_enabled else 'disabled'}" +
+          (f" (report all cycles)" if tg_report_all else ""))
     print("Press Ctrl+C to stop.\n")
 
     running = True
@@ -671,11 +695,13 @@ def watch_loop(targets: list[tuple[str, int]], timeout: float, interval: int,
     while running:
         cycle_start = time.monotonic()
         alerts_this_cycle = 0
+        cycle_results = []
 
         for host, port in targets:
             key = f"{host}:{port}"
             prev = state.get(key)
             r = check_domain(host, port, timeout)
+            cycle_results.append(r)
 
             if not alert_only or prev is None:
                 # полный вывод при первом запуске
@@ -689,6 +715,10 @@ def watch_loop(targets: list[tuple[str, int]], timeout: float, interval: int,
                     send_telegram_alert(tg_token, tg_chat_id, r, prev if prev != r["status"] else None)
 
             state[key] = r["status"]
+
+        # Telegram: сводка по всем доменам после каждого цикла
+        if tg_enabled and tg_report_all:
+            send_telegram_report(tg_token, tg_chat_id, cycle_results)
 
         elapsed = time.monotonic() - cycle_start
         if not alert_only or alerts_this_cycle > 0:
@@ -807,7 +837,8 @@ Examples:
             sys.exit(1)
         watch_loop(targets, args.timeout, args.interval,
                    args.log, args.alert, args.verbose,
-                   tg_token, tg_chat_id)
+                   tg_token, tg_chat_id,
+                   getattr(args, "telegram_report_all", False))
         return
 
     # ── single-run mode ──
