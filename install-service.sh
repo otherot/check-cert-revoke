@@ -22,16 +22,21 @@ cp requirements.txt "$INSTALL_DIR/"
 cp check-cert-revoke.service /etc/systemd/system/
 
 # Create venv and install Python deps
-if ! python3 -m venv --help &>/dev/null 2>&1; then
-    echo "Installing python3-venv..."
-    apt-get install -y python3-venv
-fi
+echo "Installing prerequisites..."
+apt-get install -y python3-pip python3-venv curl
 
 VENV="$INSTALL_DIR/venv"
 if [[ ! -x "$VENV/bin/python3" ]]; then
-    rm -rf "$VENV"  # удаляем битое окружение от предыдущей попытки
+    rm -rf "$VENV"
     python3 -m venv "$VENV"
 fi
+
+# ensure pip is available in the venv
+if ! "$VENV/bin/python3" -m pip --version &>/dev/null; then
+    echo "Bootstrapping pip in venv..."
+    curl -sS https://bootstrap.pypa.io/get-pip.py | "$VENV/bin/python3"
+fi
+
 "$VENV/bin/python3" -m pip install -r "$INSTALL_DIR/requirements.txt"
 
 # Copy config if not exists
