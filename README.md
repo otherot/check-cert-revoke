@@ -146,12 +146,18 @@ sudo bash install-service.sh
 
 This installs to `/opt/check-cert-revoke`, creates a config at `/etc/check-cert-revoke/config.json`, and starts a systemd service.
 
-**Manual setup:**
+**Upgrade:**
 
 ```bash
-sudo cp check-cert-revoke.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now check-cert-revoke
+cd check-cert-revoke && git pull && sudo bash install-service.sh
+```
+
+The script auto-detects an existing installation: stops the service, backs up your config, replaces files, recreates the venv, restores config, and restarts.
+
+**Uninstall:**
+
+```bash
+sudo bash install-service.sh --uninstall
 ```
 
 **Management:**
