@@ -21,8 +21,14 @@ cp check_cert_revoke.py "$INSTALL_DIR/"
 cp requirements.txt "$INSTALL_DIR/"
 cp check-cert-revoke.service /etc/systemd/system/
 
-# Install Python deps
-pip3 install -r "$INSTALL_DIR/requirements.txt"
+# Install Python deps (try pip3, then pip, then python3 -m pip)
+if command -v pip3 &>/dev/null; then
+    pip3 install -r "$INSTALL_DIR/requirements.txt"
+elif command -v pip &>/dev/null; then
+    pip install -r "$INSTALL_DIR/requirements.txt"
+else
+    python3 -m pip install -r "$INSTALL_DIR/requirements.txt"
+fi
 
 # Copy config if not exists
 if [[ ! -f "$CONFIG_DIR/config.json" ]]; then

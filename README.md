@@ -11,7 +11,7 @@ SSL/TLS certificate revocation checker with **OCSP + CRL auto-fallback**, watch 
 ## 1-line install (Linux)
 
 ```bash
-sudo apt install python3-pip -y && pip install cryptography && git clone https://github.com/otherot/check-cert-revoke.git && cd check-cert-revoke
+sudo apt install python3-pip -y && python3 -m pip install cryptography && git clone https://github.com/otherot/check-cert-revoke.git && cd check-cert-revoke
 ```
 
 Or with `pipx`:
