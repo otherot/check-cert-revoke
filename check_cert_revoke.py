@@ -447,7 +447,18 @@ def send_telegram_report(token: str, chat_id: str, results: list[dict]):
             "GOOD": "\u2705", "REVOKED": "\u274c", "EXPIRED": "\u26a0\ufe0f",
             "ERROR": "\u2757", "UNKNOWN": "\u2753", "WARNING": "\u26a0\ufe0f",
         }.get(r["status"], "\u2139\ufe0f")
-        lines.append(f"{emoji} `{r['host']}:{r['port']}` — {r['status']}")
+        line = f"{emoji} `{r['host']}:{r['port']}` — {r['status']}"
+
+        # добавляем дни до истечения для валидных
+        if r["status"] == "GOOD" and r["valid_to"]:
+            try:
+                expiry = datetime.fromisoformat(r["valid_to"])
+                days_left = (expiry - datetime.now(timezone.utc)).days
+                line += f" ({days_left}d left)"
+            except (ValueError, TypeError):
+                pass
+
+        lines.append(line)
 
     _send_telegram_raw(token, chat_id, "\n".join(lines))
 
@@ -471,8 +482,20 @@ def _format_telegram_message(r: dict, prev_status: str | None = None) -> str:
         f"*Domain:* `{r['host']}:{r['port']}`",
         f"*Subject:* {_escape_md(r['subject'])}",
         f"*Issuer:* {_escape_md(r['issuer'])}",
+        f"*Valid:* {r['valid_from'][:10]} \u2192 {r['valid_to'][:10]}",
         f"*Status:* {r['status']}",
     ]
+
+    # предупреждение о скором истечении (30 дней)
+    if r["status"] == "GOOD" and r["valid_to"]:
+        try:
+            expiry = datetime.fromisoformat(r["valid_to"])
+            days_left = (expiry - datetime.now(timezone.utc)).days
+            if days_left <= 30:
+                lines.append(f"\u23f0 *Expires in {days_left} days!*")
+        except (ValueError, TypeError):
+            pass
+
     if prev_status:
         lines.append(f"*Changed:* {prev_status} \u2192 {r['status']}")
     if r["detail"]:
