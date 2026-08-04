@@ -427,6 +427,13 @@ def send_telegram_report(token: str, chat_id: str, results: list[dict]):
     _send_telegram_raw(token, chat_id, "\n".join(lines))
 
 
+def _escape_md(text: str) -> str:
+    """Экранирует спецсимволы Telegram Markdown."""
+    for ch in ("*", "_", "[", "]", "`"):
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
 def _format_telegram_message(r: dict, prev_status: str | None = None) -> str:
     """Форматирует сообщение для Telegram по одному сертификату."""
     emoji = {
@@ -437,14 +444,14 @@ def _format_telegram_message(r: dict, prev_status: str | None = None) -> str:
     lines = [
         f"{emoji} *Certificate Check*",
         f"*Domain:* `{r['host']}:{r['port']}`",
-        f"*Subject:* {r['subject']}",
-        f"*Issuer:* {r['issuer']}",
+        f"*Subject:* {_escape_md(r['subject'])}",
+        f"*Issuer:* {_escape_md(r['issuer'])}",
         f"*Status:* {r['status']}",
     ]
     if prev_status:
         lines.append(f"*Changed:* {prev_status} \u2192 {r['status']}")
     if r["detail"]:
-        lines.append(f"*Details:* {r['detail']}")
+        lines.append(f"*Details:* {_escape_md(r['detail'])}")
     if r["method"]:
         lines.append(f"*Method:* {r['method']}")
     return "\n".join(lines)
@@ -462,7 +469,15 @@ def _send_telegram_raw(token: str, chat_id: str, text: str):
     try:
         req = Request(url, data=payload, headers={"Content-Type": "application/json"})
         with urlopen(req, timeout=10) as resp:
-            resp.read()
+            body = json.loads(resp.read())
+            if not body.get("ok") and "parse" in body.get("description", "").lower():
+                # Fallback: retry without Markdown
+                payload2 = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+                req2 = Request(url, data=payload2, headers={"Content-Type": "application/json"})
+                with urlopen(req2, timeout=10) as resp2:
+                    resp2.read()
+            else:
+                pass  # already read
     except Exception as e:
         print(f"[!] Telegram send failed: {e}", file=sys.stderr)
 
@@ -535,8 +550,8 @@ def _handle_bot_command(token: str, chat_id: str, text: str,
             "",
             "*Commands:*",
             "/status — Check all configured domains",
-            "/check _domain_ — Check a specific domain",
-            "/check _domain:port_ — With custom port",
+            "/check \\_domain\\_ — Check a specific domain",
+            "/check \\_domain:port\\_ — With custom port",
             "/help — This message",
         ]
         _send_telegram_raw(token, chat_id, "\n".join(lines))
