@@ -477,6 +477,7 @@ def telegram_bot_loop(token: str, allowed_chat_id: str | None,
 
     offset = 0
     last_update_id = 0
+    print("[bot] Telegram bot polling started", file=sys.stderr)
 
     while running_flag():
         try:
@@ -485,11 +486,13 @@ def telegram_bot_loop(token: str, allowed_chat_id: str | None,
             req = Request(url + params)
             with urlopen(req, timeout=35) as resp:
                 data = json.loads(resp.read())
-        except Exception:
+        except Exception as e:
+            print(f"[bot] Poll error: {e}", file=sys.stderr)
             time.sleep(5)
             continue
 
         if not data.get("ok"):
+            print(f"[bot] API error: {data}", file=sys.stderr)
             time.sleep(5)
             continue
 
@@ -506,6 +509,8 @@ def telegram_bot_loop(token: str, allowed_chat_id: str | None,
             chat_id = str(chat.get("id", ""))
             text = (msg.get("text") or "").strip()
 
+            print(f"[bot] Message from chat {chat_id}: {text[:80]}", file=sys.stderr)
+
             # фильтр по chat_id если задан
             if allowed_chat_id and chat_id != allowed_chat_id:
                 _send_telegram_raw(token, chat_id, "\u274c Access denied.")
@@ -514,6 +519,8 @@ def telegram_bot_loop(token: str, allowed_chat_id: str | None,
             _handle_bot_command(token, chat_id, text, targets, timeout)
 
         time.sleep(0.5)
+
+    print("[bot] Telegram bot stopped", file=sys.stderr)
 
 
 def _handle_bot_command(token: str, chat_id: str, text: str,
@@ -947,11 +954,14 @@ Examples:
             bot_thread = threading.Thread(
                 target=telegram_bot_loop,
                 args=(tg_token, tg_chat_id, targets, args.timeout,
-                      lambda: True),  # running_flag — упрощённо всегда True
+                      lambda: True),
                 daemon=True,
             )
             bot_thread.start()
             print(f"Telegram bot started (commands: /status, /check, /help)")
+            # отправляем приветственное сообщение
+            _send_telegram_raw(tg_token, tg_chat_id,
+                "\U0001f44b Bot online! Type /help for commands.")
 
         watch_loop(targets, args.timeout, args.interval,
                    args.log, args.alert, args.verbose,
