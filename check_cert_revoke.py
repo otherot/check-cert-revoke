@@ -164,8 +164,15 @@ def check_ocsp(cert: x509.Certificate, issuer: x509.Certificate,
     if single == OCSPCertStatus.GOOD:
         return {"method": "OCSP", "status": "GOOD", "detail": ""}
     elif single == OCSPCertStatus.REVOKED:
-        return {"method": "OCSP", "status": "REVOKED",
-                "detail": "Certificate revoked"}
+        reason_parts = []
+        if ocsp_response.revocation_reason:
+            reason_parts.append(f"reason: {_revocation_reason_name(ocsp_response.revocation_reason)}")
+        if ocsp_response.revocation_time_utc:
+            reason_parts.append(f"revocation time: {ocsp_response.revocation_time_utc.isoformat()}")
+        detail = "Certificate revoked"
+        if reason_parts:
+            detail += ", " + ", ".join(reason_parts)
+        return {"method": "OCSP", "status": "REVOKED", "detail": detail}
     else:
         return {"method": "OCSP", "status": "UNKNOWN",
                 "detail": "OCSP responder returned status UNKNOWN"}
@@ -237,11 +244,21 @@ def check_crl(cert: x509.Certificate, timeout: float = 10.0) -> dict:
         # Проверяем серийный номер
         revoked = crl.get_revoked_certificate_by_serial_number(serial)
         if revoked is not None:
-            reason = ""
+            reason_parts = []
             if revoked.revocation_date_utc:
-                reason = f", revocation date: {revoked.revocation_date_utc.isoformat()}"
+                reason_parts.append(f"revocation date: {revoked.revocation_date_utc.isoformat()}")
+            # Пытаемся извлечь причину отзыва из расширений CRL
+            try:
+                from cryptography.x509 import OID_CRL_REASON
+                reason_ext = revoked.extensions.get_extension_for_oid(OID_CRL_REASON)
+                reason_parts.append(f"reason: {_revocation_reason_name(reason_ext.value)}")
+            except Exception:
+                pass
+            detail = "Certificate found in CRL"
+            if reason_parts:
+                detail += ", " + ", ".join(reason_parts)
             return {"method": "CRL", "status": "REVOKED",
-                    "detail": f"Certificate found in CRL{reason}"}
+                    "detail": detail}
         else:
             return {"method": "CRL", "status": "GOOD",
                     "detail": f"Certificate not found in CRL ({url})"}
@@ -357,6 +374,31 @@ def _cn_from_dn(dn: x509.Name) -> str:
         if attr.oid == x509.oid.NameOID.COMMON_NAME:
             return attr.value
     return ""
+
+
+def _revocation_reason_name(reason) -> str:
+    """Возвращает человекочитаемое название причины отзыва."""
+    names = {
+        "unspecified": "unspecified",
+        "key_compromise": "key compromise",
+        "ca_compromise": "CA compromise",
+        "affiliation_changed": "affiliation changed",
+        "superseded": "superseded",
+        "cessation_of_operation": "cessation of operation",
+        "certificate_hold": "certificate hold",
+        "remove_from_crl": "remove from CRL",
+        "privilege_withdrawn": "privilege withdrawn",
+        "aa_compromise": "AA compromise",
+    }
+    # CRLReason -> reason -> ReasonFlags, or bare ReasonFlags
+    raw = getattr(reason, "reason", None)
+    if raw is None:
+        raw = str(reason)
+    else:
+        raw = str(raw)
+    if "." in raw:
+        raw = raw.rsplit(".", 1)[-1]
+    return names.get(raw, raw)
 
 
 # ── Telegram-уведомления ─────────────────────────────────────────────────────

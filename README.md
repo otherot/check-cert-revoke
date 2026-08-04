@@ -37,7 +37,6 @@ python check_cert_revoke.py -f domains.txt
 ```
 example.com
 google.com
-ddp-web.online.sberbank.ru
 internal-host:8443
 ```
 
