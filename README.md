@@ -91,8 +91,7 @@ All options can be placed in `config.json`. CLI flags override config values.
     "domains": [
         "example.com",
         "google.com",
-        "internal-api:8443",
-        {"host": "custom-port.example.com", "port": 9443}
+        "internal-api:8443"
     ],
     "timeout": 10,
     "watch": true,
@@ -108,7 +107,7 @@ All options can be placed in `config.json`. CLI flags override config values.
 }
 ```
 
-Domains without an explicit port default to **443** (HTTPS). To specify a port, use `host:port` string or `{"host": "...", "port": ...}` object.
+Domains without a port default to **443** (HTTPS). To specify a port, use `host:port`.
 
 Run with:
 
