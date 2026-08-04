@@ -457,29 +457,64 @@ def _format_telegram_message(r: dict, prev_status: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def _send_telegram_raw(token: str, chat_id: str, text: str):
-    """Отправляет сырое сообщение в Telegram."""
+def _send_telegram_raw(token: str, chat_id: str, text: str, *, reply_markup: dict = None):
+    """Отправляет сообщение в Telegram. При ошибке Markdown — fallback в plain text."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = json.dumps({
+    payload = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "Markdown",
-    }).encode("utf-8")
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
+    def _do_send(body_dict):
+        req = Request(url, data=json.dumps(body_dict).encode("utf-8"),
+                      headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
 
     try:
-        req = Request(url, data=payload, headers={"Content-Type": "application/json"})
-        with urlopen(req, timeout=10) as resp:
-            body = json.loads(resp.read())
-            if not body.get("ok") and "parse" in body.get("description", "").lower():
-                # Fallback: retry without Markdown
-                payload2 = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
-                req2 = Request(url, data=payload2, headers={"Content-Type": "application/json"})
-                with urlopen(req2, timeout=10) as resp2:
-                    resp2.read()
-            else:
-                pass  # already read
+        body = _do_send(payload)
+        if not body.get("ok") and "parse" in body.get("description", "").lower():
+            payload["parse_mode"] = ""
+            _do_send(payload)
     except Exception as e:
         print(f"[!] Telegram send failed: {e}", file=sys.stderr)
+
+
+def _bot_menu_keyboard() -> dict:
+    """Возвращает reply_markup с персистентным меню."""
+    return {
+        "keyboard": [
+            [{"text": "\U0001f4ca Status"}, {"text": "\U0001f50d Check"}],
+            [{"text": "\u2139\ufe0f Help"}],
+        ],
+        "resize_keyboard": True,
+        "persistent": True,
+    }
+
+
+def telegram_setup_bot(token: str):
+    """Регистрирует команды бота в Telegram."""
+    commands = [
+        {"command": "status", "description": "Check all configured domains"},
+        {"command": "check", "description": "Check a specific domain"},
+        {"command": "help", "description": "Show available commands"},
+    ]
+    for method, payload in [
+        ("setMyCommands", {"commands": commands, "scope": {"type": "default"}}),
+        ("setMyName", {"name": "CertRevoke"}),
+    ]:
+        try:
+            url = f"https://api.telegram.org/bot{token}/{method}"
+            req = Request(url, data=json.dumps(payload).encode("utf-8"),
+                          headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=10) as resp:
+                resp.read()
+        except Exception as e:
+            print(f"[bot] Setup {method} failed: {e}", file=sys.stderr)
+    print("[bot] Commands and menu registered", file=sys.stderr)
 
 
 # ── Telegram-бот (интерактивные команды) ──────────────────────────────────────
@@ -540,9 +575,20 @@ def telegram_bot_loop(token: str, allowed_chat_id: str | None,
 
 def _handle_bot_command(token: str, chat_id: str, text: str,
                          targets: list[tuple[str, int]], timeout: float):
-    """Обрабатывает команду от пользователя."""
+    """Обрабатывает команду или нажатие кнопки от пользователя."""
+    # кнопки меню приходят как обычный текст
+    btn_lower = text.lower()
+    if btn_lower in ("\U0001f4ca status", "status"):
+        text = "/status"
+    elif btn_lower in ("\U0001f50d check", "check"):
+        text = "/check"
+    elif btn_lower in ("\u2139\ufe0f help", "help"):
+        text = "/help"
+
     parts = text.split(maxsplit=1)
     cmd = parts[0].lower().lstrip("/")
+
+    kb = _bot_menu_keyboard()
 
     if cmd in ("start", "help"):
         lines = [
@@ -553,42 +599,46 @@ def _handle_bot_command(token: str, chat_id: str, text: str,
             "/check \\_domain\\_ — Check a specific domain",
             "/check \\_domain:port\\_ — With custom port",
             "/help — This message",
+            "",
+            "_Use the menu below for quick access_ \U0001f447",
         ]
-        _send_telegram_raw(token, chat_id, "\n".join(lines))
+        _send_telegram_raw(token, chat_id, "\n".join(lines), reply_markup=kb)
 
     elif cmd == "status":
         if not targets:
-            _send_telegram_raw(token, chat_id, "\u2139\ufe0f No domains configured.")
+            _send_telegram_raw(token, chat_id,
+                "\u2139\ufe0f No domains configured.", reply_markup=kb)
             return
-        _send_telegram_raw(token, chat_id, "\U0001f50d Checking all domains...")
+        _send_telegram_raw(token, chat_id,
+            "\U0001f50d Checking all domains...", reply_markup=kb)
         results = []
         for host, port in targets:
             r = check_domain(host, port, timeout)
             results.append(r)
-            text = _format_telegram_message(r)
-            _send_telegram_raw(token, chat_id, text)
+            _send_telegram_raw(token, chat_id, _format_telegram_message(r), reply_markup=kb)
         if len(results) > 1:
             send_telegram_report(token, chat_id, results)
 
     elif cmd == "check":
         arg = parts[1].strip() if len(parts) > 1 else ""
         if not arg:
-            _send_telegram_raw(token, chat_id, "Usage: `/check example.com` or `/check example.com:8443`")
+            _send_telegram_raw(token, chat_id,
+                "Usage: `/check example.com` or `/check example.com:8443`", reply_markup=kb)
             return
         if ":" in arg:
             host, port_str = arg.rsplit(":", 1)
-            try:
-                port = int(port_str)
-            except ValueError:
-                port = 443
+            try: port = int(port_str)
+            except ValueError: port = 443
         else:
             host, port = arg, 443
-        _send_telegram_raw(token, chat_id, f"\U0001f50d Checking `{host}:{port}`...")
+        _send_telegram_raw(token, chat_id,
+            f"\U0001f50d Checking `{host}:{port}`...", reply_markup=kb)
         r = check_domain(host, port, timeout)
-        _send_telegram_raw(token, chat_id, _format_telegram_message(r))
+        _send_telegram_raw(token, chat_id, _format_telegram_message(r), reply_markup=kb)
 
     else:
-        _send_telegram_raw(token, chat_id, f"Unknown command: /{cmd}. Try /help")
+        _send_telegram_raw(token, chat_id,
+            f"Unknown command: {_escape_md(text)} — try /help", reply_markup=kb)
 
 
 # ── конфиг-файл ──────────────────────────────────────────────────────────────
@@ -968,6 +1018,7 @@ Examples:
         bot_thread = None
         if tg_enabled and getattr(args, "telegram_bot", False):
             import threading
+            telegram_setup_bot(tg_token)
             bot_thread = threading.Thread(
                 target=telegram_bot_loop,
                 args=(tg_token, tg_chat_id, targets, args.timeout,
@@ -976,9 +1027,10 @@ Examples:
             )
             bot_thread.start()
             print(f"Telegram bot started (commands: /status, /check, /help)")
-            # отправляем приветственное сообщение
+            kb = _bot_menu_keyboard()
             _send_telegram_raw(tg_token, tg_chat_id,
-                "\U0001f44b Bot online! Type /help for commands.")
+                "\U0001f44b *Bot online!* Use the menu or type /help for commands.",
+                reply_markup=kb)
 
         watch_loop(targets, args.timeout, args.interval,
                    args.log, args.alert, args.verbose,
