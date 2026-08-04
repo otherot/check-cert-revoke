@@ -645,10 +645,12 @@ def apply_config(cfg: dict, args: argparse.Namespace):
 
     # telegram
     tg = cfg.get("telegram", {})
-    if not hasattr(args, "telegram_token"):
+    if not args.telegram_token:
         args.telegram_token = tg.get("bot_token")
         args.telegram_chat_id = tg.get("chat_id")
+    if not hasattr(args, "telegram_report_all"):
         args.telegram_report_all = tg.get("report_all", False)
+    if not hasattr(args, "telegram_bot"):
         args.telegram_bot = tg.get("bot_enabled", False)
 
 
