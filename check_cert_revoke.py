@@ -697,14 +697,8 @@ def apply_config(cfg: dict, args: argparse.Namespace):
 
     # domains из конфига добавляем к CLI-доменам
     if "domains" in cfg and isinstance(cfg["domains"], list):
-        default_port = cfg.get("port", 443)
         for d in cfg["domains"]:
-            if isinstance(d, dict):
-                host = d.get("host", "")
-                port = d.get("port", default_port)
-                domain_str = f"{host}:{port}"
-            else:
-                domain_str = str(d)
+            domain_str = str(d)
             if domain_str not in args.domains:
                 args.domains.append(domain_str)
 
