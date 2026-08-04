@@ -129,6 +129,36 @@ options:
 3. If OCSP fails or is unavailable → **CRL** — downloads the CRL from Distribution Points and checks the serial number
 4. If both methods fail → reports `UNKNOWN`
 
+## Linux systemd service (background daemon)
+
+```bash
+# Clone, install, and start as a service
+git clone https://github.com/otherot/check-cert-revoke.git
+cd check-cert-revoke
+sudo bash install-service.sh
+```
+
+This installs to `/opt/check-cert-revoke`, creates a config at `/etc/check-cert-revoke/config.json`, and starts a systemd service.
+
+**Manual setup:**
+
+```bash
+sudo cp check-cert-revoke.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now check-cert-revoke
+```
+
+**Management:**
+
+```bash
+systemctl status check-cert-revoke    # check status
+journalctl -u check-cert-revoke -f    # follow logs
+systemctl stop check-cert-revoke      # stop
+systemctl restart check-cert-revoke   # restart
+```
+
+The service auto-restarts on failure with a 30-second delay.
+
 ## Requirements
 
 - **Python 3.11+**
