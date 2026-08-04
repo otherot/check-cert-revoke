@@ -1,0 +1,23 @@
+{
+    "_comment": "SSL Certificate Revocation Checker — config file",
+    "_usage": "python check_cert_revoke.py --config config.json",
+
+    "domains": [
+        "example.com",
+        "google.com",
+        "internal-host:8443"
+    ],
+
+    "port": 443,
+    "timeout": 10,
+
+    "watch": true,
+    "interval": 3600,
+    "alert_only": true,
+    "log_file": "certs.log",
+
+    "telegram": {
+        "bot_token": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz",
+        "chat_id": "123456789"
+    }
+}
