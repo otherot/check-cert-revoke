@@ -467,6 +467,108 @@ def _send_telegram_raw(token: str, chat_id: str, text: str):
         print(f"[!] Telegram send failed: {e}", file=sys.stderr)
 
 
+# ── Telegram-бот (интерактивные команды) ──────────────────────────────────────
+
+def telegram_bot_loop(token: str, allowed_chat_id: str | None,
+                       targets: list[tuple[str, int]], timeout: float,
+                       running_flag: callable):
+    """Фоновый поток: слушает команды через long-polling."""
+    import threading
+
+    offset = 0
+    last_update_id = 0
+
+    while running_flag():
+        try:
+            url = f"https://api.telegram.org/bot{token}/getUpdates"
+            params = f"?offset={offset}&timeout=30"
+            req = Request(url + params)
+            with urlopen(req, timeout=35) as resp:
+                data = json.loads(resp.read())
+        except Exception:
+            time.sleep(5)
+            continue
+
+        if not data.get("ok"):
+            time.sleep(5)
+            continue
+
+        for update in data.get("result", []):
+            update_id = update.get("update_id", 0)
+            if update_id > last_update_id:
+                last_update_id = update_id
+            offset = update_id + 1
+
+            msg = update.get("message")
+            if not msg:
+                continue
+            chat = msg.get("chat", {})
+            chat_id = str(chat.get("id", ""))
+            text = (msg.get("text") or "").strip()
+
+            # фильтр по chat_id если задан
+            if allowed_chat_id and chat_id != allowed_chat_id:
+                _send_telegram_raw(token, chat_id, "\u274c Access denied.")
+                continue
+
+            _handle_bot_command(token, chat_id, text, targets, timeout)
+
+        time.sleep(0.5)
+
+
+def _handle_bot_command(token: str, chat_id: str, text: str,
+                         targets: list[tuple[str, int]], timeout: float):
+    """Обрабатывает команду от пользователя."""
+    parts = text.split(maxsplit=1)
+    cmd = parts[0].lower().lstrip("/")
+
+    if cmd in ("start", "help"):
+        lines = [
+            "\U0001f4e1 *Certificate Revocation Checker*",
+            "",
+            "*Commands:*",
+            "/status — Check all configured domains",
+            "/check _domain_ — Check a specific domain",
+            "/check _domain:port_ — With custom port",
+            "/help — This message",
+        ]
+        _send_telegram_raw(token, chat_id, "\n".join(lines))
+
+    elif cmd == "status":
+        if not targets:
+            _send_telegram_raw(token, chat_id, "\u2139\ufe0f No domains configured.")
+            return
+        _send_telegram_raw(token, chat_id, "\U0001f50d Checking all domains...")
+        results = []
+        for host, port in targets:
+            r = check_domain(host, port, timeout)
+            results.append(r)
+            text = _format_telegram_message(r)
+            _send_telegram_raw(token, chat_id, text)
+        if len(results) > 1:
+            send_telegram_report(token, chat_id, results)
+
+    elif cmd == "check":
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        if not arg:
+            _send_telegram_raw(token, chat_id, "Usage: `/check example.com` or `/check example.com:8443`")
+            return
+        if ":" in arg:
+            host, port_str = arg.rsplit(":", 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                port = 443
+        else:
+            host, port = arg, 443
+        _send_telegram_raw(token, chat_id, f"\U0001f50d Checking `{host}:{port}`...")
+        r = check_domain(host, port, timeout)
+        _send_telegram_raw(token, chat_id, _format_telegram_message(r))
+
+    else:
+        _send_telegram_raw(token, chat_id, f"Unknown command: /{cmd}. Try /help")
+
+
 # ── конфиг-файл ──────────────────────────────────────────────────────────────
 
 def load_config(path: str) -> dict:
@@ -540,6 +642,7 @@ def apply_config(cfg: dict, args: argparse.Namespace):
         args.telegram_token = tg.get("bot_token")
         args.telegram_chat_id = tg.get("chat_id")
         args.telegram_report_all = tg.get("report_all", False)
+        args.telegram_bot = tg.get("bot_enabled", False)
 
 
 def _get_explicit_args() -> dict[str, bool]:
@@ -823,6 +926,7 @@ Examples:
     # ── Telegram: CLI переопределяет конфиг ──
     tg_token = args.telegram_token
     tg_chat_id = args.telegram_chat_id
+    tg_enabled = bool(tg_token and tg_chat_id)
 
     targets = parse_targets(args)
 
@@ -835,6 +939,20 @@ Examples:
         if args.interval < 10:
             print("Interval must be at least 10 seconds.", file=sys.stderr)
             sys.exit(1)
+
+        # запускаем фонового бота если включён
+        bot_thread = None
+        if tg_enabled and getattr(args, "telegram_bot", False):
+            import threading
+            bot_thread = threading.Thread(
+                target=telegram_bot_loop,
+                args=(tg_token, tg_chat_id, targets, args.timeout,
+                      lambda: True),  # running_flag — упрощённо всегда True
+                daemon=True,
+            )
+            bot_thread.start()
+            print(f"Telegram bot started (commands: /status, /check, /help)")
+
         watch_loop(targets, args.timeout, args.interval,
                    args.log, args.alert, args.verbose,
                    tg_token, tg_chat_id,

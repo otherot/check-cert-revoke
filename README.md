@@ -69,6 +69,19 @@ python check_cert_revoke.py --config config.json
 python check_cert_revoke.py -w -f domains.txt --telegram-token "123:abc" --telegram-chat-id "456"
 ```
 
+### Interactive bot commands
+
+Enable `"bot_enabled": true` in the config and the bot will respond to commands:
+
+| Command | Description |
+|---------|-------------|
+| `/status` | Check all configured domains now |
+| `/check example.com` | Check a specific domain |
+| `/check example.com:8443` | Check with custom port |
+| `/help` | Show available commands |
+
+The bot runs in a background thread alongside the watch loop — periodic checks continue while the bot listens for commands.
+
 ## JSON config file
 
 All options can be placed in `config.json`. CLI flags override config values.
@@ -90,7 +103,8 @@ All options can be placed in `config.json`. CLI flags override config values.
     "telegram": {
         "bot_token": "123456:ABC-DEF...",
         "chat_id": "123456789",
-        "report_all": true
+        "report_all": false,
+        "bot_enabled": true
     }
 }
 ```
