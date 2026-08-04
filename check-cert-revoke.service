@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=%u
-ExecStart=/usr/bin/python3 /opt/check-cert-revoke/check_cert_revoke.py --watch --config /etc/check-cert-revoke/config.json
+ExecStart=/opt/check-cert-revoke/venv/bin/python3 /opt/check-cert-revoke/check_cert_revoke.py --watch --config /etc/check-cert-revoke/config.json
 Restart=always
 RestartSec=30
 StandardOutput=journal

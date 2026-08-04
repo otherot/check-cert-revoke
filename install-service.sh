@@ -21,12 +21,17 @@ cp check_cert_revoke.py "$INSTALL_DIR/"
 cp requirements.txt "$INSTALL_DIR/"
 cp check-cert-revoke.service /etc/systemd/system/
 
-# Install Python deps (install pip if missing, then use it)
-if ! python3 -m pip --version &>/dev/null; then
-    echo "Installing python3-pip..."
-    apt-get install -y python3-pip
+# Create venv and install Python deps
+if ! python3 -m venv --help &>/dev/null 2>&1; then
+    echo "Installing python3-venv..."
+    apt-get install -y python3-venv
 fi
-python3 -m pip install -r "$INSTALL_DIR/requirements.txt"
+
+VENV="$INSTALL_DIR/venv"
+if [[ ! -d "$VENV" ]]; then
+    python3 -m venv "$VENV"
+fi
+"$VENV/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 
 # Copy config if not exists
 if [[ ! -f "$CONFIG_DIR/config.json" ]]; then
