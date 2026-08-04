@@ -14,7 +14,7 @@
     "watch": true,
     "interval": 3600,
     "alert_only": true,
-    "log_file": "certs.log",
+    "log_file": "/var/log/check-cert-revoke.log",
 
     "telegram": {
         "bot_token": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz",

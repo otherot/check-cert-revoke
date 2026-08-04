@@ -81,7 +81,7 @@ All options can be placed in `config.json`. CLI flags override config values.
     "watch": true,
     "interval": 3600,
     "alert_only": true,
-    "log_file": "certs.log",
+    "log_file": "/var/log/check-cert-revoke.log",
     "telegram": {
         "bot_token": "123456:ABC-DEF...",
         "chat_id": "123456789"
