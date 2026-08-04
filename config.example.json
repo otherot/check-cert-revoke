@@ -9,7 +9,6 @@
         {"host": "custom-port.example.com", "port": 9443}
     ],
 
-    "port": 443,
     "timeout": 10,
 
     "watch": true,
