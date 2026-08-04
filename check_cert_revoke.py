@@ -269,7 +269,8 @@ def check_crl(cert: x509.Certificate, timeout: float = 10.0) -> dict:
 
 # ── основная логика проверки ─────────────────────────────────────────────────
 
-def check_domain(host: str, port: int = 443, timeout: float = 10.0) -> dict:
+def check_domain(host: str, port: int = 443, timeout: float = 10.0,
+                 retries: int = 0, retry_delay: int = 5) -> dict:
     """Проверяет сертификат домена: OCSP, при неудаче — CRL."""
     result = {
         "host": host,
@@ -284,28 +285,52 @@ def check_domain(host: str, port: int = 443, timeout: float = 10.0) -> dict:
         "detail": "",
     }
 
-    try:
-        cert, chain = get_certificate_chain(host, port, timeout)
-    except socket.gaierror:
-        result["status"] = "ERROR"
-        result["detail"] = f"Could not resolve hostname: {host}"
-        return result
-    except socket.timeout:
-        result["status"] = "ERROR"
-        result["detail"] = f"Connection timeout: {host}:{port}"
-        return result
-    except ConnectionRefusedError:
-        result["status"] = "ERROR"
-        result["detail"] = f"Connection refused: {host}:{port}"
-        return result
-    except ssl.SSLError as e:
-        result["status"] = "ERROR"
-        result["detail"] = f"SSL error: {e}"
-        return result
-    except OSError as e:
-        result["status"] = "ERROR"
-        result["detail"] = f"Connection error: {e}"
-        return result
+    _RETRYABLE = (socket.gaierror, socket.timeout, ConnectionRefusedError)
+
+    for attempt in range(retries + 1):
+        try:
+            cert, chain = get_certificate_chain(host, port, timeout)
+            break  # успех — выходим из цикла
+        except socket.gaierror:
+            if attempt < retries:
+                print(f"[!] DNS error for {host}, retry {attempt + 1}/{retries} in {retry_delay}s...",
+                      file=sys.stderr)
+                time.sleep(retry_delay)
+                continue
+            result["status"] = "ERROR"
+            result["detail"] = f"Could not resolve hostname: {host}"
+            return result
+        except socket.timeout:
+            if attempt < retries:
+                print(f"[!] Timeout for {host}:{port}, retry {attempt + 1}/{retries} in {retry_delay}s...",
+                      file=sys.stderr)
+                time.sleep(retry_delay)
+                continue
+            result["status"] = "ERROR"
+            result["detail"] = f"Connection timeout: {host}:{port}"
+            return result
+        except ConnectionRefusedError:
+            if attempt < retries:
+                print(f"[!] Connection refused for {host}:{port}, retry {attempt + 1}/{retries} in {retry_delay}s...",
+                      file=sys.stderr)
+                time.sleep(retry_delay)
+                continue
+            result["status"] = "ERROR"
+            result["detail"] = f"Connection refused: {host}:{port}"
+            return result
+        except ssl.SSLError as e:
+            result["status"] = "ERROR"
+            result["detail"] = f"SSL error: {e}"
+            return result
+        except OSError as e:
+            if attempt < retries and not isinstance(e, ssl.SSLError):
+                print(f"[!] Connection error for {host}:{port}: {e}, retry {attempt + 1}/{retries} in {retry_delay}s...",
+                      file=sys.stderr)
+                time.sleep(retry_delay)
+                continue
+            result["status"] = "ERROR"
+            result["detail"] = f"Connection error: {e}"
+            return result
 
     # Заполняем информацию о сертификате
     result["subject"] = _cn_from_dn(cert.subject)
@@ -521,7 +546,8 @@ def telegram_setup_bot(token: str):
 
 def telegram_bot_loop(token: str, allowed_chat_id: str | None,
                        targets: list[tuple[str, int]], timeout: float,
-                       running_flag: callable):
+                       running_flag: callable,
+                       retries: int = 0, retry_delay: int = 5):
     """Фоновый поток: слушает команды через long-polling."""
     import threading
 
@@ -566,7 +592,7 @@ def telegram_bot_loop(token: str, allowed_chat_id: str | None,
                 _send_telegram_raw(token, chat_id, "\u274c Access denied.")
                 continue
 
-            _handle_bot_command(token, chat_id, text, targets, timeout)
+            _handle_bot_command(token, chat_id, text, targets, timeout, retries, retry_delay)
 
         time.sleep(0.5)
 
@@ -574,7 +600,8 @@ def telegram_bot_loop(token: str, allowed_chat_id: str | None,
 
 
 def _handle_bot_command(token: str, chat_id: str, text: str,
-                         targets: list[tuple[str, int]], timeout: float):
+                         targets: list[tuple[str, int]], timeout: float,
+                         retries: int = 0, retry_delay: int = 5):
     """Обрабатывает команду или нажатие кнопки от пользователя."""
     # кнопки меню приходят как обычный текст
     btn_lower = text.lower()
@@ -613,7 +640,7 @@ def _handle_bot_command(token: str, chat_id: str, text: str,
             "\U0001f50d Checking all domains...", reply_markup=kb)
         results = []
         for host, port in targets:
-            r = check_domain(host, port, timeout)
+            r = check_domain(host, port, timeout, retries, retry_delay)
             results.append(r)
             _send_telegram_raw(token, chat_id, _format_telegram_message(r), reply_markup=kb)
         if len(results) > 1:
@@ -633,7 +660,7 @@ def _handle_bot_command(token: str, chat_id: str, text: str,
             host, port = arg, 443
         _send_telegram_raw(token, chat_id,
             f"\U0001f50d Checking `{host}:{port}`...", reply_markup=kb)
-        r = check_domain(host, port, timeout)
+        r = check_domain(host, port, timeout, retries, retry_delay)
         _send_telegram_raw(token, chat_id, _format_telegram_message(r), reply_markup=kb)
 
     else:
@@ -690,6 +717,8 @@ def apply_config(cfg: dict, args: argparse.Namespace):
     args.alert = _use_cfg("alert")
     args.verbose = _use_cfg("verbose")
     args.log = _use_cfg("log", "log_file")
+    args.retries = _use_cfg("retries")
+    args.retry_delay = _use_cfg("retry_delay", "retry_delay")
 
     # watch: включаем если в конфиге есть interval или явно watch=true
     if not cli_overrides.get("watch") and cfg.get("watch", False):
@@ -841,7 +870,8 @@ def log_result(r: dict, log_file: str, alert_only: bool, prev_status: str | None
 def watch_loop(targets: list[tuple[str, int]], timeout: float, interval: int,
                log_file: str | None, alert_only: bool, verbose: bool,
                tg_token: str | None = None, tg_chat_id: str | None = None,
-               tg_report_all: bool = False):
+               tg_report_all: bool = False,
+               retries: int = 0, retry_delay: int = 5):
     """Бесконечный цикл проверки по расписанию."""
     state: dict[str, str] = {}  # key: "host:port" -> previous status
 
@@ -871,7 +901,7 @@ def watch_loop(targets: list[tuple[str, int]], timeout: float, interval: int,
         for host, port in targets:
             key = f"{host}:{port}"
             prev = state.get(key)
-            r = check_domain(host, port, timeout)
+            r = check_domain(host, port, timeout, retries, retry_delay)
             cycle_results.append(r)
 
             if not alert_only or prev is None:
@@ -972,6 +1002,14 @@ Examples:
         help="Alert only on status changes or problems (suppress unchanged GOOD, only with --watch)",
     )
     parser.add_argument(
+        "--retries", type=int, default=0, metavar="N",
+        help="Retry on transient errors (DNS, timeout, connection) N times (default: 0)",
+    )
+    parser.add_argument(
+        "--retry-delay", type=int, default=5, metavar="SEC",
+        help="Delay between retries in seconds (default: 5)",
+    )
+    parser.add_argument(
         "-c", "--config",
         help="JSON config file (can contain all options including telegram)",
     )
@@ -1016,7 +1054,7 @@ Examples:
             bot_thread = threading.Thread(
                 target=telegram_bot_loop,
                 args=(tg_token, tg_chat_id, targets, args.timeout,
-                      lambda: True),
+                      lambda: True, args.retries, args.retry_delay),
                 daemon=True,
             )
             bot_thread.start()
@@ -1029,13 +1067,14 @@ Examples:
         watch_loop(targets, args.timeout, args.interval,
                    args.log, args.alert, args.verbose,
                    tg_token, tg_chat_id,
-                   getattr(args, "telegram_report_all", False))
+                   getattr(args, "telegram_report_all", False),
+                   args.retries, args.retry_delay)
         return
 
     # ── single-run mode ──
     exit_code = 0
     for host, port in targets:
-        r = check_domain(host, port, args.timeout)
+        r = check_domain(host, port, args.timeout, args.retries, args.retry_delay)
         print_result(r, args.verbose)
         if r["status"] in ("REVOKED", "EXPIRED", "ERROR"):
             exit_code = 1

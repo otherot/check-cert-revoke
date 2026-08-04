@@ -9,6 +9,7 @@
     ],
 
     "timeout": 10,
+    "retries": 3,
 
     "watch": true,
     "interval": 3600,

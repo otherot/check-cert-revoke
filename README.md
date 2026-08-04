@@ -94,6 +94,7 @@ All options can be placed in `config.json`. CLI flags override config values.
         "internal-api:8443"
     ],
     "timeout": 10,
+    "retries": 3,
     "watch": true,
     "interval": 3600,
     "alert_only": true,
@@ -137,6 +138,8 @@ options:
   -i, --interval SEC    Check interval (default: 3600, only with --watch)
   -l, --log FILE        Log results to file
   -a, --alert           Suppress unchanged GOOD results (only with --watch)
+  --retries N           Retry N times on transient network errors (default: 0)
+  --retry-delay SEC     Seconds between retries (default: 5)
   -c, --config FILE     JSON config file
   --telegram-token      Telegram bot token (overrides config)
   --telegram-chat-id    Telegram chat ID (overrides config)
