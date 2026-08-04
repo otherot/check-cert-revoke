@@ -28,10 +28,11 @@ if ! python3 -m venv --help &>/dev/null 2>&1; then
 fi
 
 VENV="$INSTALL_DIR/venv"
-if [[ ! -d "$VENV" ]]; then
+if [[ ! -x "$VENV/bin/python3" ]]; then
+    rm -rf "$VENV"  # удаляем битое окружение от предыдущей попытки
     python3 -m venv "$VENV"
 fi
-"$VENV/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+"$VENV/bin/python3" -m pip install -r "$INSTALL_DIR/requirements.txt"
 
 # Copy config if not exists
 if [[ ! -f "$CONFIG_DIR/config.json" ]]; then
