@@ -1,0 +1,26 @@
+[Unit]
+Description=SSL/TLS Certificate Revocation Checker
+Documentation=https://github.com/otherot/check-cert-revoke
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%u
+ExecStart=/usr/bin/python3 /opt/check-cert-revoke/check_cert_revoke.py --watch --config /etc/check-cert-revoke/config.json
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=check-cert-revoke
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/check-cert-revoke /etc/check-cert-revoke /var/log
+ReadOnlyPaths=/
+
+[Install]
+WantedBy=multi-user.target
